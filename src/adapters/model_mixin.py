@@ -1984,7 +1984,17 @@ class ModelAdaptersMixin(PushAdapterToHubMixin, ABC):
 
         def gradient_checkpointing_function(function, *args, **kwargs):
             context = ForwardContext.get_context()
-            context_fn = lambda: (contextlib.nullcontext(), context)
+            adapter_setup = AdapterSetup.get_context() or AdapterSetup(self.active_adapters)
+
+            class RecomputeContext(contextlib.ExitStack):
+                def __enter__(self):
+                    super().__enter__()
+                    # Backward may run outside the AdapterSetup used for the forward pass.
+                    self.enter_context(context)
+                    self.enter_context(adapter_setup)
+                    return self
+
+            context_fn = lambda: (contextlib.nullcontext(), RecomputeContext())
             return checkpoint(function, *args, context_fn=context_fn, **kwargs)
 
         gradient_checkpointing_func = functools.partial(
